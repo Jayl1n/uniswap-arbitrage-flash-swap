@@ -24,7 +24,7 @@ contract Flashswap {
     constructor() {
         owner = msg.sender;
     }
-
+    // 交易链入口
     function start(
         uint _maxBlockNumber,
         address _tokenBorrow, // example BUSD
@@ -34,20 +34,20 @@ contract Flashswap {
         address _targetRouter,
         address _sourceFactory
     ) external {
-        require(block.number <= _maxBlockNumber, 'e00');
+        require(block.number <= _maxBlockNumber, 'e00'); // 限制执行区块
 
-        // recheck for stopping and gas usage
-        (int256 profit, uint256 _tokenBorrowAmount) = check(_tokenBorrow, _amountTokenPay, _tokenPay, _sourceRouter, _targetRouter);
+        // recheck for stopping and gas usage   检查是否有利润
+        (int256 profit, uint256 _tokenBorrowAmount) = check(_tokenBorrow, _amountTokenPay, _tokenPay, _sourceRouter, _targetRouter); 
         require(profit > 0, 'e01');
-
-        address pairAddress = IUniswapV2Factory(_sourceFactory).getPair(_tokenBorrow, _tokenPay); // is it cheaper to compute this locally?
-        require(pairAddress != address(0), 'e10');
+        
+        address pairAddress = IUniswapV2Factory(_sourceFactory).getPair(_tokenBorrow, _tokenPay); // is it cheaper to compute this locally?   获取两个代币交易的pair地址
+        require(pairAddress != address(0), 'e10'); // pair可能不存在
 
         address token0 = IUniswapV2Pair(pairAddress).token0();
         address token1 = IUniswapV2Pair(pairAddress).token1();
 
         require(token0 != address(0) && token1 != address(0), 'e11');
-
+        // 执行交易
         IUniswapV2Pair(pairAddress).swap(
             _tokenBorrow == token0 ? _tokenBorrowAmount : 0,
             _tokenBorrow == token1 ? _tokenBorrowAmount : 0,
@@ -67,16 +67,16 @@ contract Flashswap {
         address[] memory path2 = new address[](2);
         path1[0] = path2[1] = _tokenPay;
         path1[1] = path2[0] = _tokenBorrow;
-
+        // 用 router 计算输出
         uint256 amountOut = IUniswapV2Router(_sourceRouter).getAmountsOut(_amountTokenPay, path1)[1];
         uint256 amountRepay = IUniswapV2Router(_targetRouter).getAmountsOut(amountOut, path2)[1];
 
         return (
-            int256(amountRepay - _amountTokenPay), // our profit or loss; example output: BNB amount
+            int256(amountRepay - _amountTokenPay), // our profit or loss; example output: BNB amount  计算PnL
             amountOut // the amount we get from our input "_amountTokenPay"; example: BUSD amount
         );
     }
-
+    // 闪电贷回调，实现套利
     function execute(address _sender, uint256 _amount0, uint256 _amount1, bytes calldata _data) internal {
         // obtain an amount of token that you exchanged
         uint256 amountToken = _amount0 == 0 ? _amount1 : _amount0;
@@ -99,12 +99,12 @@ contract Flashswap {
 
         // IERC20 token that we will sell for otherToken
         IERC20 token = IERC20(_amount0 == 0 ? token1 : token0);
-        token.approve(targetRouter, amountToken);
+        token.approve(targetRouter, amountToken); // 授权代币数量
 
-        // calculate the amount of token how much input token should be reimbursed
+        // calculate the amount of token how much input token should be reimbursed      计算需要归还的数量
         uint256 amountRequired = IUniswapV2Router(sourceRouter).getAmountsIn(amountToken, path1)[0];
 
-        // swap token and obtain equivalent otherToken amountRequired as a result
+        // swap token and obtain equivalent otherToken amountRequired as a result  执行swap
         uint256 amountReceived = IUniswapV2Router(targetRouter).swapExactTokensForTokens(
             amountToken,
             amountRequired, // we already now what we need at least for payback; get less is a fail; slippage can be done via - ((amountRequired * 19) / 981) + 1,
@@ -119,8 +119,8 @@ contract Flashswap {
         IERC20 otherToken = IERC20(_amount0 == 0 ? token0 : token1);
 
         // transfer failing already have error message
-        otherToken.transfer(msg.sender, amountRequired); // send back borrow
-        otherToken.transfer(owner, amountReceived - amountRequired); // our win
+        otherToken.transfer(msg.sender, amountRequired); // send back borrow  支付本金+利息
+        otherToken.transfer(owner, amountReceived - amountRequired); // our win 盈利部分发送给合约owner
     }
 
     // pancake, pancakeV2, apeswap, kebab
